@@ -1,0 +1,8 @@
+#include<iostream>
+
+int main(){
+	int age = 22;
+	age = age + 2;
+	cout << "my age after 2 year is " << age << endl;
+	return o;
+}
