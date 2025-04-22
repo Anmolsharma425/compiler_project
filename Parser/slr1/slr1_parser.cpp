@@ -190,7 +190,7 @@ map<char, set<char>> compute_first_sets(const vector<string>& grammar) {
             string rhs = prod.substr(arrow_pos + 2);
 
 
-            if (rhs.empty() || (rhs.length() == 1 && rhs[0] == EPSILON_CHAR)) {
+            if (rhs.empty()) { // Treat empty RHS as epsilon
                  size_t before = first[lhs].size();
                  first[lhs].insert(EPSILON_CHAR);
                  if (first[lhs].size() > before) changed = true;
@@ -200,7 +200,7 @@ map<char, set<char>> compute_first_sets(const vector<string>& grammar) {
 
             bool derives_epsilon_sequence = true;
             for (char symbol : rhs) {
-                 if (symbol == EPSILON_CHAR) continue; // Skip explicit epsilon symbols in RHS
+                 // Note: No check for EPSILON_CHAR here, assuming it's only for empty prod
 
                 set<char> first_of_symbol;
                 if (!isupper(symbol)) {
@@ -211,7 +211,7 @@ map<char, set<char>> compute_first_sets(const vector<string>& grammar) {
                          first_of_symbol = first.at(symbol);
                     } else {
                         cerr << "Warning: Non-terminal '" << symbol << "' found in RHS but not defined as LHS in grammar." << endl;
-                        derives_epsilon_sequence = false;
+                        derives_epsilon_sequence = false; // Cannot determine if it derives epsilon
                     }
                 }
 
@@ -274,7 +274,7 @@ map<char, set<char>> compute_follow_sets(const vector<string>& grammar,
                 bool beta_derives_epsilon = true;
                 for (size_t j = i + 1; j < rhs.length(); ++j) {
                     char next_symbol = rhs[j];
-                     if (next_symbol == EPSILON_CHAR) continue;
+                     // if (next_symbol == EPSILON_CHAR) continue; // Not needed if # only for empty
 
                     set<char> first_of_next;
 
@@ -370,7 +370,7 @@ void build_parsing_table(
                         if (action_table.count(i) && action_table[i].count(symbol)) {
                              if (action_table[i][symbol] != shift_action) {
                                  throw runtime_error("SLR(1) conflict (Shift/Reduce) in state " +
-                                     to_string(i) + " on terminal '" + symbol +
+                                     to_string(i) + " on terminal '" + string(1,symbol) + // Use string(1,symbol) here
                                      "'. Existing: " + action_table[i][symbol] + ", Attempting Shift: " + shift_action);
                              }
 
@@ -384,24 +384,16 @@ void build_parsing_table(
 
             }
 
-            else {
-                string production_rule_with_arrow = item.substr(0, dot_pos);
-                string production_rule_no_dot;
-                 size_t arrow_pos_in_item = production_rule_with_arrow.find("->");
-                 if (arrow_pos_in_item != string::npos) {
-                      production_rule_no_dot = production_rule_with_arrow; // Already has arrow, remove dot
-                 } else {
-                      // This case shouldn't happen if items are well-formed
-                      cerr << "Warning: Malformed item found: " << item << endl;
-                      continue;
-                 }
+            else { // Dot at the end
+                string production_rule_with_arrow = item.substr(0, dot_pos); // e.g., "X->S." becomes "X->S"
+                string production_rule_no_dot = production_rule_with_arrow; // For comparison
 
 
                 if (production_rule_no_dot == augmented_production_no_dot) {
                      if (action_table.count(i) && action_table[i].count('$')) {
                           if (action_table[i]['$'] != "Accept") {
-                              throw runtime_error("SLR(1) conflict (Accept/Reduce) in state " +
-                                  to_string(i) + " on '$'. Existing: " + action_table[i]['$'] + ", Attempting Accept.");
+                              throw runtime_error("SLR(1) conflict (Accept vs " + action_table[i]['$'] + ") in state " + // Added conflicting action
+                                  to_string(i) + " on '$'.");
                           }
 
                      } else {
@@ -427,7 +419,7 @@ void build_parsing_table(
                                  if (action_table.count(i) && action_table[i].count(term_in_follow)) {
                                      if (action_table[i][term_in_follow] != reduce_action) {
                                          throw runtime_error("SLR(1) conflict (Shift/Reduce or Reduce/Reduce) in state " +
-                                             to_string(i) + " on terminal '" + term_in_follow +
+                                             to_string(i) + " on terminal '" + string(1, term_in_follow) + // Use string(1,term_in_follow)
                                              "'. Existing: " + action_table[i][term_in_follow] + ", Attempting Reduce: " + reduce_action);
                                      }
                                  } else {
@@ -499,7 +491,7 @@ bool parse_input(
                  if (i + 1 < state_stack.size()) {
                     stack_oss << " " << symbol_stack[i] << " " << state_stack[i+1];
                  } else {
-                     stack_oss << " " << symbol_stack[i] << " ?STATE?";
+                     stack_oss << " " << symbol_stack[i] << " ?STATE?"; // Should not happen if stacks are synced
                  }
              }
          }
@@ -529,7 +521,7 @@ bool parse_input(
             string rhs = production_rule.substr(arrow_pos + 2);
              char lhs_non_terminal = production_rule[0];
              int pop_count = 0;
-             if (!(rhs.empty() || (rhs.length() == 1 && rhs[0] == EPSILON_CHAR))) {
+             if (!rhs.empty()) { // Check if RHS is actually empty (handled epsilon earlier)
                 pop_count = rhs.length();
              }
 
@@ -590,11 +582,14 @@ string compress_name(const string &name) {
     for (char c : name) {
         if (isalnum(c)) {
             comp_name += c;
-        } else {
+        } else if (comp_name.length() > 0 && comp_name.back() != '_') { // Prevent multiple underscores
              comp_name += '_';
         }
     }
-     if (comp_name.length() > 50) {
+    if (!comp_name.empty() && comp_name.back() == '_') {
+        comp_name.pop_back(); // Remove trailing underscore
+    }
+     if (comp_name.length() > 50) { // Limit length
          comp_name = comp_name.substr(0, 50);
      }
     return comp_name.empty() ? "output" : comp_name;
@@ -604,7 +599,7 @@ void save_file(const string &content, int grammar_num, const string &name_suffix
     try {
         string directory = "parsable_strings/" + to_string(grammar_num) + "/";
         fs::create_directories(directory);
-        string filename = directory + name_suffix + ".txt";
+        string filename = directory + name_suffix + ".txt"; // Suffix already contains parser type
         ofstream f(filename);
         if (!f) {
             cerr << "Error: Could not open file for writing: " << filename << endl;
@@ -631,7 +626,6 @@ string format_table_to_string(const vector<vector<string>>& data, const vector<s
          if (j < header.size()) col_widths[j] = max(col_widths[j], header[j].length());
      }
      for (const auto& row : data) {
-         // Ensure row has enough columns before accessing
          for (size_t j = 0; j < num_cols; ++j) {
             if (j < row.size()) {
                 col_widths[j] = max(col_widths[j], row[j].length());
@@ -639,9 +633,12 @@ string format_table_to_string(const vector<vector<string>>& data, const vector<s
          }
      }
 
-
+     // Adjust min width for better table look
      for (size_t j = 0; j < num_cols; ++j) {
-         col_widths[j] = max(col_widths[j], (size_t)5); // Minimum width
+        if (header[j] == "Stack") col_widths[j] = max(col_widths[j], (size_t)15);
+        else if (header[j] == "Input Buffer") col_widths[j] = max(col_widths[j], (size_t)15);
+        else if (header[j] == "Action") col_widths[j] = max(col_widths[j], (size_t)10);
+        else col_widths[j] = max(col_widths[j], (size_t)5); // Min width for other columns
      }
 
 
@@ -677,7 +674,7 @@ int main() {
     try {
         cout << "SLR(1) Parser Generator and Parser\n";
         cout << "===================================\n";
-        cout << "Note: Assumes epsilon is represented by empty RHS or '" << EPSILON_CHAR << "' in grammar file.\n";
+        cout << "Note: Assumes epsilon is represented by empty RHS in grammar file.\n";
 
 
         int grammar_num;
@@ -697,19 +694,19 @@ int main() {
             line.erase(0, line.find_first_not_of(" \t\n\r\f\v"));
             line.erase(line.find_last_not_of(" \t\n\r\f\v") + 1);
              if (!line.empty() && line.find("->") != string::npos) {
-                // Handle explicit epsilon representation '#'
                  size_t arrow_pos = line.find("->");
                  string rhs = line.substr(arrow_pos + 2);
+                 // Trim RHS to check for emptiness representing epsilon
                  rhs.erase(0, rhs.find_first_not_of(" \t"));
                  rhs.erase(rhs.find_last_not_of(" \t") + 1);
-                 if (rhs == string(1, EPSILON_CHAR)) {
+                 if (rhs.empty()) {
+                    // Store empty RHS rule as is, it represents epsilon
                     line = line.substr(0, arrow_pos + 2);
                  }
                 original_grammar.push_back(line);
-                cout << "  " << line << (rhs == string(1, EPSILON_CHAR) ? " (# representation used)" : "") << endl;
-
-            } else if (!line.empty()) {
-                cout << "  Skipping invalid line: " << line << endl;
+                cout << "  " << line << (rhs.empty() ? " (Epsilon Rule)" : "") << endl;
+            } else if (!line.empty() && line.rfind("//", 0) != 0) { // Allow comments
+                cout << "  Skipping non-production line: " << line << endl;
             }
         }
         grammar_file.close();
@@ -734,7 +731,7 @@ int main() {
 
         cout << "\nAugmented Grammar (for state generation):\n";
         cout << "  " << augmented_start_rule_no_dot << endl;
-        for(const string& prod : original_grammar) cout << "  " << prod << endl;
+        //for(const string& prod : original_grammar) cout << "  " << prod << endl; // Redundant
         cout << "---------------------------------------------------------------\n";
 
 
@@ -785,11 +782,9 @@ int main() {
          sort(terminals.begin(), terminals.end());
          auto dollar_it = find(terminals.begin(), terminals.end(), "$");
          if(dollar_it != terminals.end()) {
-            rotate(dollar_it, dollar_it + 1, terminals.end()); // Move $ to end
-         } else if (!terminals.empty() && terminals.back() != "$") {
-             terminals.push_back("$");
-         } else if (terminals.empty()) {
-              terminals.push_back("$");
+            rotate(dollar_it, dollar_it + 1, terminals.end());
+         } else if (terminals_set.count('$')) { // Ensure $ is present if needed
+            terminals.push_back("$");
          }
 
 
@@ -823,7 +818,8 @@ int main() {
          }
 
          cout << "\nSLR(1) Parsing Table:\n";
-         cout << format_table_to_string(table_data, header);
+         string slr_table_string = format_table_to_string(table_data, header); // Store table string
+         cout << slr_table_string;
          cout << "---------------------------------------------------------------\n";
 
 
@@ -849,19 +845,49 @@ int main() {
 
 
          string file_base_name = compress_name(input_string);
+         string result_string;
+         string file_suffix;
+
         if (accepted) {
-            cout << "Result: SUCCESS! String \"" << input_string << "\" is accepted by the grammar.\n";
-            save_file(parsing_steps_table, grammar_num, file_base_name + "_slr1");
+            result_string = "Result: SUCCESS! String \"" + input_string + "\" is accepted by the SLR(1) grammar.\n";
+            file_suffix = file_base_name + "_slr1"; // Suffix for accepted file
         } else {
-            cout << "Result: FAILURE! String \"" << input_string << "\" is rejected by the grammar.\n";
+            result_string = "Result: FAILURE! String \"" + input_string + "\" is rejected by the SLR(1) grammar.\n";
              if(!parse_steps.empty() && parse_steps.back().back().find("Error:") != string::npos) {
-                 cout << "Reason: " << parse_steps.back().back() << endl;
+                 result_string += "Reason: " + parse_steps.back().back() + "\n";
              }
-            save_file(parsing_steps_table, grammar_num, file_base_name + "_rejected");
+            file_suffix = file_base_name + "_slr1_rejected"; // Suffix for rejected file
         }
+        cout << result_string; // Print result to console
+
+        // Construct content for saving
+        string file_content_to_save;
+        file_content_to_save += "Grammar File: " + grammar_filename + "\n";
+        file_content_to_save += "Input String: " + input_string + "\n\n";
+        file_content_to_save += "SLR(1) Parsing Table:\n";
+        file_content_to_save += slr_table_string + "\n"; // Add the SLR table
+        file_content_to_save += "Parsing Steps:\n";
+        file_content_to_save += parsing_steps_table + "\n"; // Add the parsing steps
+        file_content_to_save += result_string; // Add the final result string
+
+        save_file(file_content_to_save, grammar_num, file_suffix); // Save the combined content
 
     } catch (const fs::filesystem_error& e) {
         cerr << "\nFilesystem Error: " << e.what() << endl;
+         cerr << "Please ensure the 'grammar' directory exists and contains the required file." << endl;
+         cerr << "Also check permissions for creating the 'parsable_strings' directory." << endl;
+        return 1;
+    } catch (const runtime_error& e) {
+        cerr << "\nRuntime Error: " << e.what() << endl;
+         if (string(e.what()).find("SLR(1) conflict") != string::npos) {
+             cerr << "The provided grammar is not SLR(1)." << endl;
+         }
+        return 1;
+    } catch (const exception& e) {
+        cerr << "\nAn unexpected error occurred: " << e.what() << endl;
+        return 1;
+    } catch (...) {
+        cerr << "\nAn unknown error occurred." << endl;
         return 1;
     }
 

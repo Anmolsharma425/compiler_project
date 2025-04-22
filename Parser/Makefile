@@ -24,6 +24,9 @@ build_lalr1: lalr1/lalr1_parser.cpp
 run_lalr1: build_lalr1
 	./lalr1_parser.out
 
+build_opp: opp/opp.cpp
+	g++ opp/opp.cpp -o opp.out -std=c++17
+
 clean:
 	rm *.out
 
